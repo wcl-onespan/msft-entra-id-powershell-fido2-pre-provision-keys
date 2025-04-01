@@ -1,0 +1,2 @@
+userId,serialNumber,credentialId,attestationObject,clientDataJson
+123,FX7ABC,cred,att,json

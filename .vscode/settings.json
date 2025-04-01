@@ -1,0 +1,7 @@
+{
+    "powershell.pester.codeLens": false,
+    "coverage-gutters.coverageFileNames": [
+        "coverage/coverage.xml",
+    ],
+    "coverage-gutters.coverageBaseDir": "${workspaceFolder}"
+}
