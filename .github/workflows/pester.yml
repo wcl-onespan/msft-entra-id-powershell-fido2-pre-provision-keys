@@ -94,7 +94,9 @@ jobs:
           [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "$nl| Line | Uncovered command |$nl|-----:|-------------------|$nl", $utf8)
 
           $results.CodeCoverage.CommandsMissed | Sort-Object Line | ForEach-Object {
-            $cmd = $_.Command -replace '\|', '\|'
+            # Command text can be multi-line (e.g. a full if-block). Keep only the first
+            # line and trim indentation so the markdown table cell doesn't break.
+            $cmd = ($_.Command -split '\r?\n')[0].Trim() -replace '\|', '\|'
             [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "| $($_.Line) | $cmd |$nl", $utf8)
           }
 
