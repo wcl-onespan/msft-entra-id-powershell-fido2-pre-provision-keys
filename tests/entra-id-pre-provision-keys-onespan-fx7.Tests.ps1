@@ -608,7 +608,10 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if UPN is null or whitespace" {
-            { Get-UserIdFromUpn -upn "" } | Should -Throw
+            # Use whitespace-only string: empty "" is rejected by PS mandatory binding before the
+            # function body runs, so the explicit throw on line 304 is never reached.
+            # Whitespace bypasses binding but IsNullOrWhiteSpace catches it, covering that line.
+            { Get-UserIdFromUpn -upn "   " } | Should -Throw
         }
 
         It "should return null if user is not found" {
@@ -655,7 +658,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if userId is null or whitespace" {
-            { Get-UpnFromUserId -userId "" } | Should -Throw
+            # Whitespace-only bypasses mandatory binding and reaches the explicit throw (line 321).
+            { Get-UpnFromUserId -userId "   " } | Should -Throw
         }
 
         It "should throw if user is not found" {
@@ -894,11 +898,14 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if required parameters are missing" {
-            { Register-Fido2Credential -userId "" -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "" -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "name" -cId "" -clientDataJson "json" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "" } | Should -Throw
+            # Empty string "" is rejected by PS mandatory binding before the function body runs.
+            # Whitespace-only "   " bypasses binding and reaches each explicit throw (lines 394-398).
+            # Each assertion targets a different throw line sequentially.
+            { Register-Fido2Credential -userId "   " -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "   " -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "name" -cId "   " -clientDataJson "json" -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "   " -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "   " } | Should -Throw
         }
 
         It "should call Invoke-MgGraphRequest with correct payload" {
