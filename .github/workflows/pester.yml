@@ -69,11 +69,35 @@ jobs:
           path: test-results.xml
           reporter: java-junit
 
+      # Upload coverage XML and JUnit XML as artifacts for the reporting job
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pester-test-artifacts
+          path: |
+            coverage/coverage.xml
+            test-results.xml
+          retention-days: 30
+
+  coverage:
+    name: Coverage Report
+    runs-on: ubuntu-latest
+    needs: pester
+    if: always()
+
+    steps:
+      # Download the artifacts produced by the pester job
+      - name: Download test artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pester-test-artifacts
+
       # Parse the JaCoCo XML and write a coverage table to the job summary
       # Also writes code-coverage-results.md for the PR comment step below
+      # Container actions require Linux — this job runs on ubuntu-latest
       - name: Generate coverage summary
         uses: irongut/CodeCoverageSummary@v1.3.0
-        if: always()
         with:
           filename: coverage/coverage.xml
           badge: true
@@ -89,18 +113,7 @@ jobs:
       # Sticky comment on the PR that updates in place on each new push
       - name: Post coverage comment to PR
         uses: marocchino/sticky-pull-request-comment@v2
-        if: github.event_name == 'pull_request' && always()
+        if: github.event_name == 'pull_request'
         with:
           recreate: true
           path: code-coverage-results.md
-
-      # Upload coverage XML and JUnit XML as workflow artifacts (retained 30 days)
-      - name: Upload test artifacts
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: pester-test-artifacts
-          path: |
-            coverage/coverage.xml
-            test-results.xml
-          retention-days: 30
