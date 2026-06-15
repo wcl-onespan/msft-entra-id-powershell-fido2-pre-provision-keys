@@ -184,7 +184,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             # Pester requires a real command to exist before it can be mocked.
             if (-not (Get-Command -Name Install-PSResource -ErrorAction SilentlyContinue)) {
                 function script:Install-PSResource {
-                    param([string]$Name, [string]$Scope, [string]$MinimumVersion, [string]$ErrorAction)
+                    # Install-PSResource (PSResourceGet) uses -Version with NuGet ranges, not -MinimumVersion.
+                    param([string]$Name, [string]$Scope, [string]$Version, [string]$ErrorAction)
                 }
             }
 
@@ -281,7 +282,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
 
             Install-ModuleIfNeeded -ModuleName $ModuleNameToInstall -MinimumVersion "2.26.0"
 
-            Assert-MockCalled Install-PSResource -Exactly 1 -ParameterFilter { $MinimumVersion -eq "2.26.0" }
+            # Production code translates MinimumVersion -> NuGet range "[x,)" (meaning >= x).
+            Assert-MockCalled Install-PSResource -Exactly 1 -ParameterFilter { $Version -eq "[2.26.0,)" }
         }
     }
 

@@ -173,7 +173,8 @@ function Install-ModuleIfNeeded {
             }
         } else {
             if ($MinimumVersion) {
-                Install-PSResource -Name $ModuleName -Scope CurrentUser -MinimumVersion $MinimumVersion -ErrorAction Stop
+                # Install-PSResource uses NuGet version range syntax; "[x,)" means >= x.
+                Install-PSResource -Name $ModuleName -Scope CurrentUser -Version "[$MinimumVersion,)" -ErrorAction Stop
             } else {
                 Install-PSResource -Name $ModuleName -Scope CurrentUser -ErrorAction Stop
             }
