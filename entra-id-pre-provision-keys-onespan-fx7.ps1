@@ -48,7 +48,7 @@
     Company: OneSpan
     License: MIT
     Dependencies: Microsoft.Graph.Identity.SignIns (MinimumVersion 2.26.0)
-    Version: 1.1.0
+    Version: 1.4.0
     CSV Schema (generate-challenges):
         - userPrincipalName
 
