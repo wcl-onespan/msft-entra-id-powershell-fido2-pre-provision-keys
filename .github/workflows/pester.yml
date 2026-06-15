@@ -26,25 +26,28 @@ jobs:
           - shell: pwsh         # PowerShell 7 (cross-platform)
             ps_label: PS7
 
+    # Apply the matrix shell to every run step so it doesn't have to be
+    # repeated on each step (and avoids expression-in-shell linting errors).
+    defaults:
+      run:
+        shell: ${{ matrix.shell }}
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
       - name: Install Pester
-        shell: ${{ matrix.shell }}
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser -SkipPublisherCheck
 
       - name: Create coverage directory
-        shell: ${{ matrix.shell }}
         run: New-Item -ItemType Directory -Force -Path coverage | Out-Null
 
       # Run tests with code coverage using New-PesterConfiguration (Pester v5 recommended approach).
       # Matrix label is expanded by Actions before the shell sees the script, so it is safe to use
       # ${{ matrix.ps_label }} inside the run block to produce per-version output file names.
       - name: Run Pester tests with code coverage
-        shell: ${{ matrix.shell }}
         env:
           TEST_MODE: "1"
         run: |
