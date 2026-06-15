@@ -1,5 +1,7 @@
 # Entra ID FIDO2 Pre-Provisioning Script
 
+![Pester Tests](https://github.com/wcl-onespan/msft-entra-id-powershell-fido2-pre-provision-keys/actions/workflows/pester.yml/badge.svg)
+
 This PowerShell script enables automated **FIDO2 credential management** for Microsoft Entra ID (Azure AD) users via the Microsoft Graph API. It supports both:
 
 - ✅ Generating **FIDO2 credential challenges** for OneSpan pre-provisioning
@@ -11,6 +13,9 @@ This PowerShell script enables automated **FIDO2 credential management** for Mic
 
 ```
 .
+├── .github/
+│   └── workflows/
+│       └── pester.yml                               # 🔄 GitHub Actions CI (tests + coverage)
 ├── entra-id-pre-provision-keys-onespan-fx7.ps1      # ✅ Main script
 ├── tests/
 │   ├── entra-id-pre-provision-keys-onespan-fx7.Tests.ps1  # ✅ Unit tests
@@ -27,18 +32,20 @@ This PowerShell script enables automated **FIDO2 credential management** for Mic
 ## 🚀 Features
 
 - Supports `generate-challenges` and `register-credentials` modes
-- Uses Microsoft Graph (Beta) API
+- Uses Microsoft Graph v1.0 API (`Microsoft.Graph.Identity.SignIns` ≥ 2.26)
 - Fully compatible with **PowerShell 5.1 and 7+**
 - Modular functions with high testability
 - Built-in logging, dry-run support, and force override
-- ⚡ 99% unit test coverage (100% functionally verified)
+- Built-in CSV data quality pre-flight check (duplicate credential/serial detection)
+- ⚡ 98 unit tests, 0 failures
+- 🔄 GitHub Actions CI with test results and coverage comment on every PR
 
 ---
 
 ## 🛠️ Requirements
 
 - PowerShell 5.1 or 7+
-- [`Microsoft.Graph.Beta`](https://www.powershellgallery.com/packages/Microsoft.Graph.Beta)
+- [`Microsoft.Graph.Identity.SignIns`](https://www.powershellgallery.com/packages/Microsoft.Graph.Identity.SignIns) ≥ 2.26.0
 - Pester (for testing)
 
 ---
@@ -48,10 +55,37 @@ This PowerShell script enables automated **FIDO2 credential management** for Mic
 Run all unit tests using Pester:
 
 ```powershell
-Invoke-Pester -Path ./tests
+$env:TEST_MODE = "1"
+Invoke-Pester -Path .\tests -Output Detailed
 ```
 
-💡 **Code coverage** is tracked in `./coverage/coverage.xml`. The remaining 1% of uncovered code is verified via testing but not reported due to [Pester's current coverage limitations](https://github.com/pester/Pester/issues/).
+To also generate a local coverage report:
+
+```powershell
+$env:TEST_MODE = "1"
+$config = New-PesterConfiguration
+$config.Run.Path = ".\tests"
+$config.CodeCoverage.Enabled = $true
+$config.CodeCoverage.Path = ".\entra-id-pre-provision-keys-onespan-fx7.ps1"
+$config.CodeCoverage.OutputFormat = "JaCoCo"
+$config.CodeCoverage.OutputPath = ".\coverage\coverage.xml"
+Invoke-Pester -Configuration $config
+```
+
+💡 **Code coverage** is tracked in `./coverage/coverage.xml` (JaCoCo format). In VS Code, live gutter highlighting is provided by the [Coverage Gutters](https://marketplace.visualstudio.com/items?itemName=ryanluker.vscode-coverage-gutters) extension — see the `.vscode/settings.json` configuration below.
+
+---
+
+## 🔄 Continuous Integration
+
+Every pull request and push to `main` runs the full test suite via GitHub Actions (`.github/workflows/pester.yml`):
+
+- ✅ Test pass/fail results appear in the **Checks** tab on the PR
+- 📊 A **coverage table** is posted as a sticky PR comment and written to the job summary
+- 📦 `coverage/coverage.xml` and `test-results.xml` are uploaded as workflow artifacts (retained 30 days)
+- 🚫 The workflow fails if line coverage drops below 90 % (warning below 70 %)
+
+> **First-time setup:** replace `<org>/<repo>` in the README badge URL with your actual GitHub repository path.
 
 ---
 
@@ -111,6 +145,12 @@ If you're using VSCode, this project includes built-in coverage and Pester suppo
 ## 🧪 Test Modes
 
 - When the environment variable `TEST_MODE=1` is set, the script will **not auto-run**. This is required for unit testing.
+
+---
+
+## 📋 Changelog
+
+See [CHANGELOG.md](CHANGELOG.md) for a full history of changes.
 
 ---
 

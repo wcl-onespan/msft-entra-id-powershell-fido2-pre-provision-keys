@@ -180,6 +180,14 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             $ModuleNameToInstall = "MyTestModule"
             $PSVersionOverride = $null
 
+            # Create a stub for Install-PSResource if not available (not shipped with PS5.1).
+            # Pester requires a real command to exist before it can be mocked.
+            if (-not (Get-Command -Name Install-PSResource -ErrorAction SilentlyContinue)) {
+                function script:Install-PSResource {
+                    param([string]$Name, [string]$Scope, [string]$MinimumVersion, [string]$ErrorAction)
+                }
+            }
+
             # Preemptively stub both to avoid resolution errors
             Mock Install-Module { "stubbed Install-Module" }
             Mock Install-PSResource { "stubbed Install-PSResource" }
@@ -214,7 +222,7 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         It "should not install module if already available" {
             Mock Get-Module {
                 param ($Name, $ListAvailable)
-                return [pscustomobject]@{ Name = $Name }
+                return [pscustomobject]@{ Name = $Name; Version = [Version]"99.0.0" }
             }
 
             Mock Install-Module -MockWith { throw "Should not be called" }
@@ -224,6 +232,56 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
 
             Assert-MockCalled Install-Module -Exactly 0
             Assert-MockCalled Install-PSResource -Exactly 0
+        }
+
+        It "should install module if installed version is below MinimumVersion (PS 5.x)" {
+            $PSVersionOverride = 5
+            Mock Get-Module {
+                param ($Name, $ListAvailable)
+                return [pscustomobject]@{ Name = $Name; Version = [Version]"2.25.0" }
+            }
+            Mock Install-Module -Verifiable
+            Mock Install-PSResource -MockWith { throw "Should not be called" }
+
+            Install-ModuleIfNeeded -ModuleName $ModuleNameToInstall -MinimumVersion "2.26.0"
+
+            Assert-MockCalled Install-Module -Exactly 1 -ParameterFilter { $MinimumVersion -eq "2.26.0" }
+        }
+
+        It "should not install module if installed version meets MinimumVersion" {
+            Mock Get-Module {
+                param ($Name, $ListAvailable)
+                return [pscustomobject]@{ Name = $Name; Version = [Version]"2.26.0" }
+            }
+
+            Mock Install-Module -MockWith { throw "Should not be called" }
+            Mock Install-PSResource -MockWith { throw "Should not be called" }
+
+            Install-ModuleIfNeeded -ModuleName $ModuleNameToInstall -MinimumVersion "2.26.0"
+
+            Assert-MockCalled Install-Module -Exactly 0
+            Assert-MockCalled Install-PSResource -Exactly 0
+        }
+
+        It "should install with MinimumVersion on PS 5.x using Install-Module" {
+            $PSVersionOverride = 5
+            Mock Get-Module { $null }
+            Mock Install-Module -Verifiable
+            Mock Install-PSResource -MockWith { throw "Should not be called" }
+
+            Install-ModuleIfNeeded -ModuleName $ModuleNameToInstall -MinimumVersion "2.26.0"
+
+            Assert-MockCalled Install-Module -Exactly 1 -ParameterFilter { $MinimumVersion -eq "2.26.0" }
+        }
+
+        It "should install with MinimumVersion on PS 7+ using Install-PSResource" -Skip:($PSVersionTable.PSVersion.Major -lt 6) {
+            Mock Get-Module { $null }
+            Mock Install-PSResource -Verifiable
+            Mock Install-Module -MockWith { throw "Should not be called" }
+
+            Install-ModuleIfNeeded -ModuleName $ModuleNameToInstall -MinimumVersion "2.26.0"
+
+            Assert-MockCalled Install-PSResource -Exactly 1 -ParameterFilter { $MinimumVersion -eq "2.26.0" }
         }
     }
 
@@ -393,6 +451,22 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             }
             (Test-CsvRow -row $row).ToString() | Should -Be "False"
         }
+
+        It "should return False for whitespace-only userId in registration row" {
+            $row = [pscustomobject]@{
+                userId = "   "
+                serialNumber = "FX7ABC"
+                credentialId = "cred"
+                attestationObject = "att"
+                clientDataJson = "json"
+            }
+            (Test-CsvRow -row $row).ToString() | Should -Be "False"
+        }
+
+        It "should return False for whitespace-only userPrincipalName in challenge row" {
+            $row = [pscustomobject]@{ userPrincipalName = "   " }
+            (Test-CsvRow -row $row -GenChallenge).ToString() | Should -Be "False"
+        }
     }
 
     Context "Import-CsvData" {
@@ -442,6 +516,80 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
     }
 
+    Context "Test-CsvDataQuality" {
+
+        BeforeEach {
+            Mock Write-Log {}
+        }
+
+        It "should return true when all credentialIds and serialNumbers are unique" {
+            $csv = @(
+                [pscustomobject]@{ credentialId = "cred-1"; serialNumber = "SN1" },
+                [pscustomobject]@{ credentialId = "cred-2"; serialNumber = "SN2" }
+            )
+
+            $result = Test-CsvDataQuality -csv $csv
+            $result | Should -BeTrue
+        }
+
+        It "should return false and warn when duplicate credentialIds are present" {
+            $csv = @(
+                [pscustomobject]@{ credentialId = "dup-cred"; serialNumber = "SN1" },
+                [pscustomobject]@{ credentialId = "dup-cred"; serialNumber = "SN2" }
+            )
+
+            $result = Test-CsvDataQuality -csv $csv
+            $result | Should -BeFalse
+            Assert-MockCalled Write-Log -Exactly 1 -Scope It -ParameterFilter {
+                $msg -like "*duplicate credentialId*'dup-cred'*" -and $type -eq "Warn"
+            }
+        }
+
+        It "should return false and warn when duplicate serialNumbers are present" {
+            $csv = @(
+                [pscustomobject]@{ credentialId = "cred-1"; serialNumber = "dup-serial" },
+                [pscustomobject]@{ credentialId = "cred-2"; serialNumber = "dup-serial" }
+            )
+
+            $result = Test-CsvDataQuality -csv $csv
+            $result | Should -BeFalse
+            Assert-MockCalled Write-Log -Exactly 1 -Scope It -ParameterFilter {
+                $msg -like "*duplicate serialNumber*'dup-serial'*" -and $type -eq "Warn"
+            }
+        }
+
+        It "should warn for both duplicate credentialIds and duplicate serialNumbers independently" {
+            $csv = @(
+                [pscustomobject]@{ credentialId = "dup-cred"; serialNumber = "dup-serial" },
+                [pscustomobject]@{ credentialId = "dup-cred"; serialNumber = "dup-serial" }
+            )
+
+            $result = Test-CsvDataQuality -csv $csv
+            $result | Should -BeFalse
+            Assert-MockCalled Write-Log -Exactly 2 -Scope It -ParameterFilter { $type -eq "Warn" }
+        }
+
+        It "should return true for a single-row CSV" {
+            $csv = @(
+                [pscustomobject]@{ credentialId = "cred-1"; serialNumber = "SN1" }
+            )
+
+            $result = Test-CsvDataQuality -csv $csv
+            $result | Should -BeTrue
+        }
+
+        It "should log a pass message when data is clean" {
+            $csv = @(
+                [pscustomobject]@{ credentialId = "cred-1"; serialNumber = "SN1" }
+            )
+
+            Test-CsvDataQuality -csv $csv | Out-Null
+            Assert-MockCalled Write-Log -Exactly 1 -Scope It -ParameterFilter {
+                $msg -like "*CSV data quality check passed*"
+            }
+        }
+    }
+
     Context "Get-UserIdFromUpn" {
 
         BeforeEach {
@@ -475,6 +623,20 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
 
             $result = Get-UserIdFromUpn -upn "error@example.com"
             $result | Should -BeNullOrEmpty
+        }
+
+        It "should escape single quotes in UPN before building OData filter" {
+            $script:capturedFilter = $null
+            Mock -CommandName Get-MgUser -MockWith {
+                param($Filter)
+                $script:capturedFilter = $Filter
+                return [pscustomobject]@{ Id = "user-apos"; UserPrincipalName = "o'reilly@example.com" }
+            }
+
+            $result = Get-UserIdFromUpn -upn "o'reilly@example.com"
+            $result | Should -Be "user-apos"
+            # Single quote in UPN must be doubled for valid OData
+            $script:capturedFilter | Should -Be "userPrincipalName eq 'o''reilly@example.com'"
         }
     }
 
@@ -552,7 +714,7 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             $userId = "test-user"
             Get-Fido2CredentialCreationOptions -userId $userId -challengeTimeoutInMinutes 15
 
-            $expectedUri = "/beta/users/$userId/authentication/fido2Methods/creationOptions?challengeTimeoutInMinutes=15"
+            $expectedUri = "/v1.0/users/$userId/authentication/fido2Methods/creationOptions?challengeTimeoutInMinutes=15"
             $script:lastUriCalled | Should -Be $expectedUri
         }
     }
@@ -754,7 +916,10 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
                 -clientDataJson $mockClientData `
                 -attestationObject $mockAttObj
 
-            $json = $script:capturedBody | ConvertFrom-Json
+            # Body is now sent as [byte[]] to bypass SDK re-serialization (SDK 2.26+)
+            # Use -is operator to check array type without pipeline unrolling
+            ($script:capturedBody -is [byte[]]) | Should -BeTrue -Because "Body must be [byte[]] to bypass Invoke-MgGraphRequest re-serialization in SDK 2.26+"
+            $json = [System.Text.Encoding]::UTF8.GetString($script:capturedBody) | ConvertFrom-Json
             $json.displayName | Should -Be $mockDisplayName
             $json.publicKeyCredential.id | Should -Be $mockCredId
             $json.publicKeyCredential.response.clientDataJSON | Should -Be $mockClientData
@@ -873,6 +1038,17 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
                 $Type -eq "Error"
             }
         }
+
+        It "should skip row and warn when Graph returns a null challenge value" {
+            Mock ConvertFrom-Json { return @{ publicKey = @{ challenge = $null } } }
+
+            Invoke-UserGenerateChallenges -csv $csv
+
+            Assert-MockCalled Export-Csv -Exactly 0 -Scope It
+            Assert-MockCalled Write-Log -Exactly 1 -Scope It -ParameterFilter {
+                $msg -like "*No challenge returned*" -and $type -eq "Warn"
+            }
+        }
     }
 
     Describe "Invoke-UserRegistrations" {
@@ -888,6 +1064,7 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             # Default mocks
             Mock Confirm-Action { return $true}
             Mock Test-CsvRow { return $true }
+            Mock Test-CsvDataQuality { return $true }
             Mock Get-UpnFromUserId { return "user@example.com" }
             Mock Test-CredentialAlreadyAssigned { return $false }
             Mock Register-Fido2Credential { return $true }
@@ -991,6 +1168,35 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
                 $msg -like "*❌ Failed/Skipped registrations: 0*" -and $ForegroundColor -eq "Red" -and $type -eq "Host"
             }
         }
+
+        It "should run data quality check after confirmation and before processing rows" {
+            Invoke-UserRegistrations -csv $csv
+
+            Assert-MockCalled Test-CsvDataQuality -Exactly 1
+        }
+
+        It "should warn but continue processing when duplicate credentialIds are found" {
+            $dupCsv = @(
+                @{ userId = "user-123"; serialNumber = "FX7-001"; credentialId = "dup-cred"; clientDataJson = "jsonData"; attestationObject = "attObj" },
+                @{ userId = "user-456"; serialNumber = "FX7-002"; credentialId = "dup-cred"; clientDataJson = "jsonData"; attestationObject = "attObj" }
+            )
+            Mock Test-CsvDataQuality { return $false }
+
+            Invoke-UserRegistrations -csv $dupCsv
+
+            # Data quality check must fire regardless of its result
+            Assert-MockCalled Test-CsvDataQuality -Exactly 1
+            # Both rows must still be attempted — deduplication happens at the credential level
+            Assert-MockCalled Register-Fido2Credential -Exactly 2
+        }
+
+        It "should not run data quality check when Confirm-Action returns false" {
+            Mock Confirm-Action { return $false }
+
+            Invoke-UserRegistrations -csv $csv
+
+            Assert-MockCalled Test-CsvDataQuality -Exactly 0
+        }
     }
 
     Describe "Script Initialization" {
@@ -1041,11 +1247,13 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             }
         }
 
-        It "Module Installation, should install Microsoft.Graph.Beta module" {
+        It "Module Installation, should install Microsoft.Graph.Identity.SignIns module with MinimumVersion 2.26.0" {
             Mock Install-ModuleIfNeeded {}
             Main -Mode "register-credentials" -TenantId "tenant" -CsvPath $CsvMockPathRegister -LogPath "C:\Temp"
 
-            Assert-MockCalled Install-ModuleIfNeeded -Exactly 1 -ParameterFilter { $ModuleName -eq "Microsoft.Graph.Beta" }
+            Assert-MockCalled Install-ModuleIfNeeded -Exactly 1 -ParameterFilter {
+                $ModuleName -eq "Microsoft.Graph.Identity.SignIns" -and $MinimumVersion -eq "2.26.0"
+            }
         }
 
         It "Graph Connection, should connect to Microsoft Graph with TenantId" {

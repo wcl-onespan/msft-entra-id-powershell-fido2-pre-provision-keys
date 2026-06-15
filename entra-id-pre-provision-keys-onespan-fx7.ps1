@@ -47,8 +47,8 @@
     Author: Will LaSala (OneSpan)
     Company: OneSpan
     License: MIT
-    Dependencies: Microsoft.Graph.Beta
-    Version: 1.0.0
+    Dependencies: Microsoft.Graph.Identity.SignIns (MinimumVersion 2.26.0)
+    Version: 1.1.0
     CSV Schema (generate-challenges):
         - userPrincipalName
 
@@ -151,14 +151,32 @@ function Write-Log {
 # ✅ Module Setup
 # -------------------------------------
 function Install-ModuleIfNeeded {
-    param ([string]$ModuleName)
-    if (-not (Get-Module -Name $ModuleName -ListAvailable)) {
+    param (
+        [string]$ModuleName,
+        [string]$MinimumVersion
+    )
+    $available = Get-Module -Name $ModuleName -ListAvailable |
+                 Sort-Object Version -Descending |
+                 Select-Object -First 1
+    $needsInstall = -not $available
+    if (-not $needsInstall -and $MinimumVersion) {
+        $needsInstall = [Version]$available.Version -lt [Version]$MinimumVersion
+    }
+    if ($needsInstall) {
         $PSMajorVersion = if ($PSVersionOverride) { $PSVersionOverride } else { $PSVersionTable.PSVersion.Major }
         Write-Log "📦 Installing module: $ModuleName" -type "Host"
         if ($PSMajorVersion -lt 7) {
-            Install-Module -Name $ModuleName -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+            if ($MinimumVersion) {
+                Install-Module -Name $ModuleName -Scope CurrentUser -Force -AllowClobber -MinimumVersion $MinimumVersion -ErrorAction Stop
+            } else {
+                Install-Module -Name $ModuleName -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+            }
         } else {
-            Install-PSResource -Name $ModuleName -Scope CurrentUser -ErrorAction Stop
+            if ($MinimumVersion) {
+                Install-PSResource -Name $ModuleName -Scope CurrentUser -MinimumVersion $MinimumVersion -ErrorAction Stop
+            } else {
+                Install-PSResource -Name $ModuleName -Scope CurrentUser -ErrorAction Stop
+            }
         }
     }
 }
@@ -252,6 +270,32 @@ function Import-CsvData {
     return $csv
 }
 
+function Test-CsvDataQuality {
+    param ([Parameter(Mandatory=$true)]$csv)
+    $valid = $true
+
+    # Detect duplicate credentialIds — only the first row will succeed in Graph;
+    # subsequent rows with the same id will be blocked by Test-CredentialAlreadyAssigned
+    # after the first registration lands, but in DryRun mode they would slip through silently.
+    $dupCredIds = $csv | Group-Object -Property credentialId | Where-Object { $_.Count -gt 1 }
+    foreach ($dup in $dupCredIds) {
+        Write-Log "⚠️ Data quality issue: duplicate credentialId '$($dup.Name)' appears $($dup.Count) times. Only the first successful registration will be kept." -type "Warn"
+        $valid = $false
+    }
+
+    # Detect duplicate serialNumbers — each FX7 token must be unique
+    $dupSerials = $csv | Group-Object -Property serialNumber | Where-Object { $_.Count -gt 1 }
+    foreach ($dup in $dupSerials) {
+        Write-Log "⚠️ Data quality issue: duplicate serialNumber '$($dup.Name)' appears $($dup.Count) times." -type "Warn"
+        $valid = $false
+    }
+
+    if ($valid) {
+        Write-Log "   ✅ CSV data quality check passed."
+    }
+    return $valid
+}
+
 # -------------------------------------
 # 🔐 Credential Handling
 # -------------------------------------
@@ -260,7 +304,9 @@ function Get-UserIdFromUpn {
     if ([string]::IsNullOrWhiteSpace($upn))         { throw "❌ upn is required and must be a string." }
     try {
         Write-Log "   🔍 Looking up UserID from UPN: $upn"
-        $user = Get-MgUser -Filter "userPrincipalName eq '$upn'" -ConsistencyLevel eventual -CountVariable count -ErrorAction Stop
+        # Escape single quotes in the UPN to prevent OData filter malformation
+        $escapedUpn = $upn -replace "'", "''"
+        $user = Get-MgUser -Filter "userPrincipalName eq '$escapedUpn'" -ConsistencyLevel eventual -CountVariable count -ErrorAction Stop
         if ($user.Count -eq 0) { throw "❌ User not found: $upn" }
         Write-Log "   ✅ User ID found: $($user.Id)"
         return $user.Id
@@ -294,7 +340,7 @@ function Get-Fido2CredentialCreationOptions {
     )
     if ([string]::IsNullOrWhiteSpace($userId))         { throw "❌ userId is required and must be a string." }
     try {
-        $uri = "/beta/users/$userId/authentication/fido2Methods/creationOptions?challengeTimeoutInMinutes=$challengeTimeoutInMinutes"
+        $uri = "/v1.0/users/$userId/authentication/fido2Methods/creationOptions?challengeTimeoutInMinutes=$challengeTimeoutInMinutes"
         Write-Log "   🌐 Requesting creation options from $uri"
         return Invoke-MgGraphRequest -Method GET -Uri $uri -OutputType Json
     } catch {
@@ -352,8 +398,8 @@ function Register-Fido2Credential {
     if ([string]::IsNullOrWhiteSpace($attestationObject)) { throw "❌ attestationObject is required." }
 
     try {
-        $uri = "/beta/users/$userId/authentication/fido2Methods"
-        $payload = @{
+        $uri = "/v1.0/users/$userId/authentication/fido2Methods"
+        $payloadJson = @{
             displayName = $displayName
             publicKeyCredential = @{
                 id = $cId
@@ -363,6 +409,7 @@ function Register-Fido2Credential {
                 }
             }
         } | ConvertTo-Json -Depth 5 -Compress
+        [byte[]] $payload = [System.Text.Encoding]::UTF8.GetBytes($payloadJson)
 
         Write-Log "   🌐 Posting registration to $uri"
         Write-Log "      Payload Length: $($payload.Length)"
@@ -375,7 +422,7 @@ function Register-Fido2Credential {
         $response = Invoke-MgGraphRequest `
             -Method POST `
             -Uri $uri `
-            -ContentType 'application/json; charset=utf-8' `
+            -ContentType 'application/json' `
             -Body $payload `
             -OutputType Json
 
@@ -413,6 +460,10 @@ function Invoke-UserGenerateChallenges {
 
         $parsed = $creationOptions | ConvertFrom-Json
         $challenge = $parsed.publicKey.challenge
+        if ([string]::IsNullOrEmpty($challenge)) {
+            Write-Log "   ⚠️ No challenge returned for $userId — skipping row." -type "Warn"
+            continue
+        }
 
         $outputRows += [pscustomobject]@{
             UserId            = $userId
@@ -441,6 +492,11 @@ function Invoke-UserRegistrations {
     if (-not (Confirm-Action "This will register FIDO2 keys to Entra users. Continue?" -Force:$Force)) {
         return
     }
+
+    # Pre-flight data quality check — warns about duplicates before any API calls are made.
+    # Processing continues so individual rows can still be attempted; duplicates will be
+    # caught by Test-CredentialAlreadyAssigned after the first registration lands.
+    Test-CsvDataQuality -csv $csv | Out-Null
 
     $successCount = 0
     $failureCount = 0
@@ -516,7 +572,7 @@ function Main {
         Write-Log "Logging to file: $(Join-Path -Path $LogPath -ChildPath $logOutputFileName)" -type "Host"
     }
 
-    Install-ModuleIfNeeded -ModuleName "Microsoft.Graph.Beta"
+    Install-ModuleIfNeeded -ModuleName "Microsoft.Graph.Identity.SignIns" -MinimumVersion "2.26.0"
     Connect-ToMsGraph -TenantId $TenantId
 
     if ($Mode -eq "generate-challenges") {
