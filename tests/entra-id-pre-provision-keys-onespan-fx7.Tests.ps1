@@ -769,7 +769,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if userId is null or whitespace" {
-            { Get-ExistingFido2Credentials -userId "" } | Should -Throw
+            # Whitespace-only bypasses mandatory binding and reaches the explicit throw (line 354).
+            { Get-ExistingFido2Credentials -userId "   " } | Should -Throw
         }
     }
 

@@ -73,18 +73,19 @@ jobs:
           $covered = $results.CodeCoverage.CommandsExecutedCount
           $total   = $results.CodeCoverage.CommandsAnalyzedCount
 
-          $indicator = if ($pct -ge $failThreshold) { "✅" } elseif ($pct -ge $warnThreshold) { "⚠️" } else { "❌" }
+          $indicator = if ($pct -ge $failThreshold) { "PASS" } elseif ($pct -ge $warnThreshold) { "WARN" } else { "FAIL" }
 
-          # Build the job summary (visible on the Actions run page)
-          "## $indicator Coverage: $pct% ($covered / $total commands)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "| Line | Uncovered command |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
-          "|-----:|-------------------|" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          # Build the job summary using UTF-8 without BOM (PS5.1 Out-File -Encoding utf8 adds BOM
+          # which corrupts emoji in GitHub's summary renderer). AppendAllText uses no-BOM UTF-8.
+          $utf8 = [System.Text.Encoding]::UTF8
+          $nl = "`n"
+          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "## [$indicator] Coverage: $pct% ($covered / $total commands)$nl", $utf8)
+          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "$nl| Line | Uncovered command |$nl|-----:|-------------------|$nl", $utf8)
 
-          $results.CodeCoverage.CommandsMissed |
-            Sort-Object Line |
-            ForEach-Object { "| $($_.Line) | ``$($_.Command)`` |" } |
-            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          $results.CodeCoverage.CommandsMissed | Sort-Object Line | ForEach-Object {
+            $cmd = $_.Command -replace '\|', '\|'
+            [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "| $($_.Line) | $cmd |$nl", $utf8)
+          }
 
           if ($pct -lt $failThreshold) {
             Write-Error "Coverage $pct% is below the required $failThreshold% threshold." -ErrorAction Continue
