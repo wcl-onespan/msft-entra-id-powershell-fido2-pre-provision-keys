@@ -69,15 +69,22 @@ jobs:
           # This avoids needing a separate Linux job and Docker-based tools.
           $warnThreshold = 70
           $failThreshold = 90
-          $pct = [Math]::Round($results.CodeCoverage.CoveragePercent, 2)
+          $pct     = [Math]::Round($results.CodeCoverage.CoveragePercent, 2)
           $covered = $results.CodeCoverage.CommandsExecutedCount
           $total   = $results.CodeCoverage.CommandsAnalyzedCount
 
           $indicator = if ($pct -ge $failThreshold) { "✅" } elseif ($pct -ge $warnThreshold) { "⚠️" } else { "❌" }
-          $summary = "$indicator Line coverage: **$pct%** ($covered / $total commands)"
 
-          # Write to the GitHub Actions job summary
-          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          # Build the job summary (visible on the Actions run page)
+          "## $indicator Coverage: $pct% ($covered / $total commands)" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "| Line | Uncovered command |" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+          "|-----:|-------------------|" | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
+
+          $results.CodeCoverage.CommandsMissed |
+            Sort-Object Line |
+            ForEach-Object { "| $($_.Line) | ``$($_.Command)`` |" } |
+            Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Encoding utf8 -Append
 
           if ($pct -lt $failThreshold) {
             Write-Error "Coverage $pct% is below the required $failThreshold% threshold." -ErrorAction Continue
