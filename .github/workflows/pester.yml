@@ -14,28 +14,37 @@ permissions:
 
 jobs:
   pester:
-    name: Run Pester Tests
+    name: Run Pester Tests (${{ matrix.ps_label }})
     runs-on: windows-latest
+
+    strategy:
+      fail-fast: false   # let both versions finish even if one fails
+      matrix:
+        include:
+          - shell: powershell   # Windows PowerShell 5.1
+            ps_label: PS5
+          - shell: pwsh         # PowerShell 7 (cross-platform)
+            ps_label: PS7
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # Install Pester using Windows PowerShell 5.1 (matches the script's minimum requirement)
       - name: Install Pester
-        shell: powershell
+        shell: ${{ matrix.shell }}
         run: |
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser -SkipPublisherCheck
 
-      # Ensure the coverage output directory exists before Pester tries to write to it
       - name: Create coverage directory
-        shell: powershell
+        shell: ${{ matrix.shell }}
         run: New-Item -ItemType Directory -Force -Path coverage | Out-Null
 
-      # Run tests with code coverage using New-PesterConfiguration (Pester v5 recommended approach)
+      # Run tests with code coverage using New-PesterConfiguration (Pester v5 recommended approach).
+      # Matrix label is expanded by Actions before the shell sees the script, so it is safe to use
+      # ${{ matrix.ps_label }} inside the run block to produce per-version output file names.
       - name: Run Pester tests with code coverage
-        shell: powershell
+        shell: ${{ matrix.shell }}
         env:
           TEST_MODE: "1"
         run: |
@@ -49,12 +58,12 @@ jobs:
           $config.CodeCoverage.Enabled      = $true
           $config.CodeCoverage.Path         = ".\entra-id-pre-provision-keys-onespan-fx7.ps1"
           $config.CodeCoverage.OutputFormat = "JaCoCo"
-          $config.CodeCoverage.OutputPath   = "coverage\coverage.xml"
+          $config.CodeCoverage.OutputPath   = "coverage\coverage-${{ matrix.ps_label }}.xml"
 
           # Test result report (JUnit XML consumed by dorny/test-reporter)
           $config.TestResult.Enabled      = $true
           $config.TestResult.OutputFormat = "JUnitXml"
-          $config.TestResult.OutputPath   = "test-results.xml"
+          $config.TestResult.OutputPath   = "test-results-${{ matrix.ps_label }}.xml"
 
           $config.Output.Verbosity = "Normal"
 
@@ -66,7 +75,6 @@ jobs:
           }
 
           # Enforce coverage threshold directly from Pester's result object.
-          # This avoids needing a separate Linux job and Docker-based tools.
           $warnThreshold = 70
           $failThreshold = 90
           $pct     = [Math]::Round($results.CodeCoverage.CoveragePercent, 2)
@@ -79,7 +87,7 @@ jobs:
           # which corrupts emoji in GitHub's summary renderer). AppendAllText uses no-BOM UTF-8.
           $utf8 = [System.Text.Encoding]::UTF8
           $nl = "`n"
-          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "## [$indicator] Coverage: $pct% ($covered / $total commands)$nl", $utf8)
+          [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "## [$indicator] Coverage (${{ matrix.ps_label }}): $pct% ($covered / $total commands)$nl", $utf8)
           [System.IO.File]::AppendAllText($env:GITHUB_STEP_SUMMARY, "$nl| Line | Uncovered command |$nl|-----:|-------------------|$nl", $utf8)
 
           $results.CodeCoverage.CommandsMissed | Sort-Object Line | ForEach-Object {
@@ -101,17 +109,17 @@ jobs:
         uses: dorny/test-reporter@v1
         if: always()
         with:
-          name: Pester Test Results
-          path: test-results.xml
+          name: Pester Test Results (${{ matrix.ps_label }})
+          path: test-results-${{ matrix.ps_label }}.xml
           reporter: java-junit
 
-      # Upload coverage XML and JUnit XML as workflow artifacts (retained 30 days)
+      # Upload per-version coverage and test results as separate artifacts
       - name: Upload test artifacts
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: pester-test-artifacts
+          name: pester-test-artifacts-${{ matrix.ps_label }}
           path: |
-            coverage/coverage.xml
-            test-results.xml
+            coverage/coverage-${{ matrix.ps_label }}.xml
+            test-results-${{ matrix.ps_label }}.xml
           retention-days: 30
