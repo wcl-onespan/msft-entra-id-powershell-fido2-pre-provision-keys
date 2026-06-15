@@ -1,0 +1,106 @@
+name: Pester Tests & Coverage
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+# Permissions required for test-reporter (checks) and PR coverage comment (pull-requests)
+permissions:
+  contents: read
+  checks: write
+  pull-requests: write
+
+jobs:
+  pester:
+    name: Run Pester Tests
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      # Install Pester using Windows PowerShell 5.1 (matches the script's minimum requirement)
+      - name: Install Pester
+        shell: powershell
+        run: |
+          Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+          Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser -SkipPublisherCheck
+
+      # Run tests with code coverage using New-PesterConfiguration (Pester v5 recommended approach)
+      - name: Run Pester tests with code coverage
+        shell: powershell
+        env:
+          TEST_MODE: "1"
+        run: |
+          $config = New-PesterConfiguration
+
+          # Test execution
+          $config.Run.Path     = ".\tests"
+          $config.Run.PassThru = $true
+
+          # Code coverage — scoped to the single production script
+          $config.CodeCoverage.Enabled      = $true
+          $config.CodeCoverage.Path         = ".\entra-id-pre-provision-keys-onespan-fx7.ps1"
+          $config.CodeCoverage.OutputFormat = "JaCoCo"
+          $config.CodeCoverage.OutputPath   = "coverage\coverage.xml"
+
+          # Test result report (JUnit XML consumed by dorny/test-reporter)
+          $config.TestResult.Enabled      = $true
+          $config.TestResult.OutputFormat = "JUnitXml"
+          $config.TestResult.OutputPath   = "test-results.xml"
+
+          $config.Output.Verbosity = "Normal"
+
+          $results = Invoke-Pester -Configuration $config
+
+          if ($results.FailedCount -gt 0) {
+            Write-Error "Pester: $($results.FailedCount) test(s) failed."
+            exit 1
+          }
+
+      # Publish test results to the Checks tab on the PR / commit
+      - name: Publish test results
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: Pester Test Results
+          path: test-results.xml
+          reporter: java-junit
+
+      # Parse the JaCoCo XML and write a coverage table to the job summary
+      # Also writes code-coverage-results.md for the PR comment step below
+      - name: Generate coverage summary
+        uses: irongut/CodeCoverageSummary@v1.3.0
+        if: always()
+        with:
+          filename: coverage/coverage.xml
+          badge: true
+          fail_below_min: true
+          format: markdown
+          hide_branch_rate: false
+          hide_complexity: true
+          indicators: true
+          output: both
+          # Warning threshold: 70 %, failure threshold: 90 %
+          thresholds: "70 90"
+
+      # Sticky comment on the PR that updates in place on each new push
+      - name: Post coverage comment to PR
+        uses: marocchino/sticky-pull-request-comment@v2
+        if: github.event_name == 'pull_request' && always()
+        with:
+          recreate: true
+          path: code-coverage-results.md
+
+      # Upload coverage XML and JUnit XML as workflow artifacts (retained 30 days)
+      - name: Upload test artifacts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: pester-test-artifacts
+          path: |
+            coverage/coverage.xml
+            test-results.xml
+          retention-days: 30

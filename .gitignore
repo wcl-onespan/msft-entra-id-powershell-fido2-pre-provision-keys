@@ -1,0 +1,5 @@
+.specstory/**
+
+# CI-generated test and coverage artifacts — not committed, uploaded as workflow artifacts instead
+test-results.xml
+code-coverage-results.md
