@@ -100,6 +100,11 @@ jobs:
           name: pester-test-artifacts
           path: .
 
+      # Pester's JaCoCo output includes a <!DOCTYPE> declaration that references
+      # an external DTD irongut cannot resolve inside Docker. Strip it first.
+      - name: Strip DOCTYPE from coverage XML
+        run: sed -i '/<!DOCTYPE/d' coverage/coverage.xml
+
       # Parse the JaCoCo XML and write a coverage table to the job summary
       # Also writes code-coverage-results.md for the PR comment step below
       # Container actions require Linux — this job runs on ubuntu-latest
