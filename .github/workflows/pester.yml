@@ -28,6 +28,11 @@ jobs:
           Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
           Install-Module -Name Pester -MinimumVersion 5.0.0 -Force -Scope CurrentUser -SkipPublisherCheck
 
+      # Ensure the coverage output directory exists before Pester tries to write to it
+      - name: Create coverage directory
+        shell: powershell
+        run: New-Item -ItemType Directory -Force -Path coverage | Out-Null
+
       # Run tests with code coverage using New-PesterConfiguration (Pester v5 recommended approach)
       - name: Run Pester tests with code coverage
         shell: powershell
@@ -88,10 +93,12 @@ jobs:
 
     steps:
       # Download the artifacts produced by the pester job
+      # path: . ensures files are extracted to the workspace root preserving directory structure
       - name: Download test artifacts
         uses: actions/download-artifact@v4
         with:
           name: pester-test-artifacts
+          path: .
 
       # Parse the JaCoCo XML and write a coverage table to the job summary
       # Also writes code-coverage-results.md for the PR comment step below
