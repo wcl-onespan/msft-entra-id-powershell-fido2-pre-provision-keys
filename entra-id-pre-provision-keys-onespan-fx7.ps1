@@ -134,7 +134,7 @@ function Write-Log {
         $fileOutputMsg = "[INFO] $msg"
     }
     if($type -eq "Error"){
-        Write-Error $msg
+        Write-Error $msg -ErrorAction Continue
         $fileOutputMsg = "[ERROR] $msg"
     }
     if($type -eq "Warn"){
