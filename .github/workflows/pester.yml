@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [ "main" ]
 
+# Opt into Node.js 24 for all JS-based actions now, before GitHub forces it on June 16 2026.
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 # Permissions required for test-reporter (checks write) and PR summary (pull-requests write)
 permissions:
   contents: read
