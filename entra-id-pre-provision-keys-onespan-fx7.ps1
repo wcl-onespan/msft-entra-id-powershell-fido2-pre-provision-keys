@@ -48,7 +48,7 @@
     Company: OneSpan
     License: MIT
     Dependencies: Microsoft.Graph.Identity.SignIns (MinimumVersion 2.26.0)
-    Version: 1.1.0
+    Version: 1.4.0
     CSV Schema (generate-challenges):
         - userPrincipalName
 
@@ -173,7 +173,8 @@ function Install-ModuleIfNeeded {
             }
         } else {
             if ($MinimumVersion) {
-                Install-PSResource -Name $ModuleName -Scope CurrentUser -MinimumVersion $MinimumVersion -ErrorAction Stop
+                # Install-PSResource uses NuGet version range syntax; "[x,)" means >= x.
+                Install-PSResource -Name $ModuleName -Scope CurrentUser -Version "[$MinimumVersion,)" -ErrorAction Stop
             } else {
                 Install-PSResource -Name $ModuleName -Scope CurrentUser -ErrorAction Stop
             }

@@ -6,6 +6,72 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.4.0] - 2026-06-15
+
+### Fixed
+
+- **`Write-Error` termination under `$ErrorActionPreference = 'Stop'`**: `Write-Log` called
+  `Write-Error $msg` without `-ErrorAction Continue`. GitHub Actions sets `Stop` as the default,
+  which caused 5 tests to terminate the runner rather than reaching the assertion. Fixed by
+  adding `-ErrorAction Continue` so the error is written to the error stream without aborting.
+
+- **`Install-PSResource` parameter name**: `Install-PSResource` (PSResourceGet, shipped with PS7)
+  has no `-MinimumVersion` parameter. The equivalent is `-Version` with NuGet range syntax:
+  `"[2.26.0,)"` means ≥ 2.26.0. Passing `-MinimumVersion` on PS7 caused a
+  `ParameterBindingException` before the Pester mock body could intercept the call.
+
+### Added
+
+- **Dual PowerShell matrix in CI** (`.github/workflows/pester.yml`):
+  - Replaced single-shell job with a matrix strategy running `powershell` (PS 5.1) and `pwsh` (PS 7) in parallel.
+  - `fail-fast: false` so both legs always run to completion.
+  - Each leg produces separate artifacts: `coverage-{PS5|PS7}.xml` and `test-results-{PS5|PS7}.xml`.
+  - PS7-specific code paths (`Install-PSResource` branch) are now exercised in CI rather than skipped.
+
+- **Inline coverage enforcement**: coverage threshold is read directly from Pester's `PassThru`
+  result object (`$results.CodeCoverage.CoveragePercent`) — no Docker-based tools required.
+  Warn threshold: 70 %, fail threshold: 90 %.
+
+- **Job summary** written with `[System.IO.File]::AppendAllText` using `[System.Text.Encoding]::UTF8`
+  (no BOM). `Out-File -Encoding utf8` in PS 5.1 writes a UTF-8 BOM which GitHub's renderer
+  displays as garbled characters. Multi-line command text is truncated to the first line to
+  prevent compound statements (e.g. `if` blocks) from breaking the markdown table.
+
+- **Branch ruleset** (`.github/branch-ruleset-main.json`): protects `main` from deletion and
+  force-push, and requires both `Run Pester Tests (PS5)` and `Run Pester Tests (PS7)` status
+  checks to pass before a PR can merge. Import via **Settings → Rules → Rulesets → Import ruleset**.
+
+- **`Scripts/Show-Coverage.ps1`**: local utility script that runs Pester with coverage and prints
+  overall percentage plus a table of uncovered lines. Run from the repo root with
+  `.\Scripts\Show-Coverage.ps1`.
+
+- **`.gitignore`**: added `coverage/` so JaCoCo XML files generated locally or by CI are never
+  accidentally committed.
+
+### CI actions upgraded to Node 24
+
+| Action | Previous | Updated |
+|---|---|---|
+| `actions/checkout` | `@v4` | `@v6` |
+| `actions/upload-artifact` | `@v4` | `@v6` |
+| `dorny/test-reporter` | `@v1` | `@v3` |
+
+All three now declare `node24` as their runtime, eliminating the Node.js 20 deprecation warnings.
+
+### Tests
+
+- Guard clause tests for `Get-UserIdFromUpn`, `Get-UpnFromUserId`, `Get-ExistingFido2Credentials`,
+  and `Register-Fido2Credential` changed from `""` (empty string, rejected by mandatory parameter
+  binding before the function body runs) to `"   "` (whitespace-only, which satisfies binding but
+  is caught by `[string]::IsNullOrWhiteSpace`). This covers the explicit `throw` lines that were
+  previously unreachable.
+
+- `Install-PSResource` test stub `param()` updated: `[string]$MinimumVersion` → `[string]$Version`
+  to match the real cmdlet's signature on PS7. `ParameterFilter` updated accordingly:
+  `$MinimumVersion -eq "2.26.0"` → `$Version -eq "[2.26.0,)"`.
+
+---
+
 ## [1.3.0] - 2026-06-15
 
 ### Added

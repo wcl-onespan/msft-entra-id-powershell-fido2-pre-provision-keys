@@ -184,7 +184,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
             # Pester requires a real command to exist before it can be mocked.
             if (-not (Get-Command -Name Install-PSResource -ErrorAction SilentlyContinue)) {
                 function script:Install-PSResource {
-                    param([string]$Name, [string]$Scope, [string]$MinimumVersion, [string]$ErrorAction)
+                    # Install-PSResource (PSResourceGet) uses -Version with NuGet ranges, not -MinimumVersion.
+                    param([string]$Name, [string]$Scope, [string]$Version, [string]$ErrorAction)
                 }
             }
 
@@ -281,7 +282,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
 
             Install-ModuleIfNeeded -ModuleName $ModuleNameToInstall -MinimumVersion "2.26.0"
 
-            Assert-MockCalled Install-PSResource -Exactly 1 -ParameterFilter { $MinimumVersion -eq "2.26.0" }
+            # Production code translates MinimumVersion -> NuGet range "[x,)" (meaning >= x).
+            Assert-MockCalled Install-PSResource -Exactly 1 -ParameterFilter { $Version -eq "[2.26.0,)" }
         }
     }
 
@@ -608,7 +610,10 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if UPN is null or whitespace" {
-            { Get-UserIdFromUpn -upn "" } | Should -Throw
+            # Use whitespace-only string: empty "" is rejected by PS mandatory binding before the
+            # function body runs, so the explicit throw on line 304 is never reached.
+            # Whitespace bypasses binding but IsNullOrWhiteSpace catches it, covering that line.
+            { Get-UserIdFromUpn -upn "   " } | Should -Throw
         }
 
         It "should return null if user is not found" {
@@ -655,7 +660,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if userId is null or whitespace" {
-            { Get-UpnFromUserId -userId "" } | Should -Throw
+            # Whitespace-only bypasses mandatory binding and reaches the explicit throw (line 321).
+            { Get-UpnFromUserId -userId "   " } | Should -Throw
         }
 
         It "should throw if user is not found" {
@@ -765,7 +771,8 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if userId is null or whitespace" {
-            { Get-ExistingFido2Credentials -userId "" } | Should -Throw
+            # Whitespace-only bypasses mandatory binding and reaches the explicit throw (line 354).
+            { Get-ExistingFido2Credentials -userId "   " } | Should -Throw
         }
     }
 
@@ -894,11 +901,14 @@ userId,serialNumber,credentialId,attestationObject,clientDataJson
         }
 
         It "should throw if required parameters are missing" {
-            { Register-Fido2Credential -userId "" -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "" -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "name" -cId "" -clientDataJson "json" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "" -attestationObject "att" } | Should -Throw
-            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "" } | Should -Throw
+            # Empty string "" is rejected by PS mandatory binding before the function body runs.
+            # Whitespace-only "   " bypasses binding and reaches each explicit throw (lines 394-398).
+            # Each assertion targets a different throw line sequentially.
+            { Register-Fido2Credential -userId "   " -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "   " -cId "id" -clientDataJson "json" -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "name" -cId "   " -clientDataJson "json" -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "   " -attestationObject "att" } | Should -Throw
+            { Register-Fido2Credential -userId "u" -displayName "name" -cId "id" -clientDataJson "json" -attestationObject "   " } | Should -Throw
         }
 
         It "should call Invoke-MgGraphRequest with correct payload" {
