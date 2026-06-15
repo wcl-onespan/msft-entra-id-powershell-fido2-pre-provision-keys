@@ -107,5 +107,3 @@ jobs:
             coverage/coverage.xml
             test-results.xml
           retention-days: 30
-
-          path: code-coverage-results.md
